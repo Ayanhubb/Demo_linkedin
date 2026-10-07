@@ -1,0 +1,103 @@
+x-backend: &backend
+  image: linkedin-scheduler-backend
+  pull_policy: never
+  environment: &backend-env
+    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-scheduler}:${POSTGRES_PASSWORD:-scheduler}@postgres:5432/${POSTGRES_DB:-linkedin_scheduler}
+    REDIS_URL: redis://redis:6379/0
+    TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
+    LINKEDIN_CLIENT_ID: ${LINKEDIN_CLIENT_ID:-}
+    LINKEDIN_CLIENT_SECRET: ${LINKEDIN_CLIENT_SECRET:-}
+    LINKEDIN_REDIRECT_URI: http://localhost:8080/api/auth/linkedin/callback
+    LINKEDIN_SCOPES: ${LINKEDIN_SCOPES:-w_member_social}
+    LINKEDIN_VERSION: ${LINKEDIN_VERSION:-202609}
+    FRONTEND_URL: http://localhost:5173
+    SECRET_KEY: ${SECRET_KEY:-}
+    CELERY_BEAT_INTERVAL_SECONDS: ${CELERY_BEAT_INTERVAL_SECONDS:-15}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-scheduler}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scheduler}
+      POSTGRES_DB: ${POSTGRES_DB:-linkedin_scheduler}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    <<: *backend
+    build: ./backend
+    pull_policy: build
+    ports:
+      - "8080:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  worker:
+    <<: *backend
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=info"]
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  beat:
+    <<: *backend
+    command:
+      [
+        "celery",
+        "-A",
+        "app.workers.celery_app:celery_app",
+        "beat",
+        "--loglevel=info",
+        "--schedule",
+        "/tmp/celerybeat-schedule",
+      ]
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8080
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
