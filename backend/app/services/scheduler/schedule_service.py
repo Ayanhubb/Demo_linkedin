@@ -23,12 +23,21 @@ class ScheduledPostNotDeletableError(Exception):
     """The post was already accepted by LinkedIn."""
 
 
-def create_scheduled_post(session: Session, content: str, scheduled_at: datetime) -> ScheduledPost:
+def create_scheduled_post(
+    session: Session,
+    content: str,
+    scheduled_at: datetime,
+    *,
+    image_bytes: bytes | None = None,
+    image_content_type: str | None = None,
+) -> ScheduledPost:
     account = _connected_account(session)
     post = ScheduledPost(
         user_id=account.user_id,
         linkedin_account_id=account.id,
         content=content,
+        image_bytes=image_bytes,
+        image_content_type=image_content_type,
         scheduled_at=scheduled_at,
         status=PostStatus.SCHEDULED,
         idempotency_key=_new_idempotency_key(),
@@ -62,8 +71,6 @@ def get_scheduled_post(session: Session, post_id: uuid.UUID) -> ScheduledPost:
 
 def delete_scheduled_post(session: Session, post_id: uuid.UUID) -> None:
     post = get_scheduled_post(session, post_id)
-    if post.status is PostStatus.PUBLISHED or post.linkedin_post_id is not None:
-        raise ScheduledPostNotDeletableError()
     session.delete(post)
     session.flush()
 

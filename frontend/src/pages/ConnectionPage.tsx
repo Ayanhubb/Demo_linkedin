@@ -30,11 +30,9 @@ export function ConnectionPage() {
 
   return (
     <section className="narrow">
-      <h1>LinkedIn Connection</h1>
-      <p className="lede">
-        Authorization stays on the API. This page never receives the client secret or the access token.
-      </p>
-      {notice === "connected" ? <p className="banner success">LinkedIn returned to the app.</p> : null}
+      <h1>LinkedIn</h1>
+      <p className="lede">Connect the profile that should receive your posts.</p>
+      {notice === "connected" ? <p className="banner success">LinkedIn is connected.</p> : null}
       {oauthError ? <p className="banner error">LinkedIn connection failed ({oauthError}).</p> : null}
       {error ? <p className="banner error">{error}</p> : null}
       <article className="card connection-card">

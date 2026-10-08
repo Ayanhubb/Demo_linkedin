@@ -11,7 +11,9 @@ AUTHORIZE_URL = "https://www.linkedin.com/oauth/v2/authorization"
 TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
 USERINFO_URL = "https://api.linkedin.com/v2/userinfo"
 POSTS_URL = "https://api.linkedin.com/rest/posts"
+IMAGES_URL = "https://api.linkedin.com/rest/images"
 REQUEST_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
+UPLOAD_TIMEOUT = httpx.Timeout(60.0, connect=5.0)
 
 
 class LinkedInOAuthError(Exception):
@@ -152,15 +154,58 @@ class LinkedInClient:
 
     def publish_text_post(self, *, access_token: str, payload: dict[str, object]) -> LinkedInCallResult:
         """POST a text post. Transport failures are returned instead of raised."""
+        return self._api_call("POST", POSTS_URL, access_token=access_token, json_body=payload)
+
+    def initialize_image_upload(self, *, access_token: str, owner: str) -> LinkedInCallResult:
+        """Register an image owned by the member and receive an upload URL."""
+        return self._api_call(
+            "POST",
+            f"{IMAGES_URL}?action=initializeUpload",
+            access_token=access_token,
+            json_body={"initializeUploadRequest": {"owner": owner}},
+        )
+
+    def upload_image(
+        self,
+        *,
+        access_token: str,
+        upload_url: str,
+        image: bytes,
+        content_type: str,
+    ) -> LinkedInCallResult:
+        """PUT image bytes to the upload URL LinkedIn returned."""
+        return self._api_call(
+            "PUT",
+            upload_url,
+            access_token=access_token,
+            content=image,
+            content_type=content_type,
+            timeout=UPLOAD_TIMEOUT,
+        )
+
+    def _api_call(
+        self,
+        method: str,
+        url: str,
+        *,
+        access_token: str,
+        json_body: dict[str, object] | None = None,
+        content: bytes | None = None,
+        content_type: str | None = None,
+        timeout: httpx.Timeout = REQUEST_TIMEOUT,
+    ) -> LinkedInCallResult:
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
             "X-Restli-Protocol-Version": "2.0.0",
             "Linkedin-Version": self._settings.linkedin_version,
         }
+        if json_body is not None:
+            headers["Content-Type"] = "application/json"
+        elif content_type:
+            headers["Content-Type"] = content_type
         try:
-            with httpx.Client(timeout=REQUEST_TIMEOUT, transport=self._transport) as client:
-                response = client.post(POSTS_URL, json=payload, headers=headers)
+            with httpx.Client(timeout=timeout, transport=self._transport, follow_redirects=False) as client:
+                response = client.request(method, url, json=json_body, content=content, headers=headers)
         except httpx.TimeoutException:
             return LinkedInCallResult(status_code=None, headers={}, body_text="", transport_error="timeout")
         except httpx.HTTPError:

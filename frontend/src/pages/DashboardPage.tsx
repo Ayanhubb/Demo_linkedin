@@ -28,7 +28,7 @@ export function DashboardPage() {
   return (
     <section>
       <h1>Dashboard</h1>
-      <p className="lede">Connection status and how many posts are waiting, published, or failed.</p>
+      <p className="lede">See what is waiting, published, or failed.</p>
       {error ? <p className="banner error">{error}</p> : null}
       <div className="metrics">
         <article className="card">

@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     Uuid,
@@ -50,6 +51,12 @@ class ScheduledPost(TimestampMixin, Base):
             name="ck_scheduled_posts_content_length",
         ),
         CheckConstraint(
+            "(image_bytes IS NULL AND image_content_type IS NULL) OR "
+            "(image_bytes IS NOT NULL AND image_content_type IS NOT NULL "
+            "AND octet_length(image_bytes) BETWEEN 1 AND 5242880)",
+            name="ck_scheduled_posts_image_pair",
+        ),
+        CheckConstraint(
             "attempt_count >= 0",
             name="ck_scheduled_posts_attempt_count_nonnegative",
         ),
@@ -84,6 +91,8 @@ class ScheduledPost(TimestampMixin, Base):
         nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    image_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    image_content_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     scheduled_at: Mapped[datetime] = mapped_column(AwareDateTime(), nullable=False)
     status: Mapped[PostStatus] = mapped_column(
         Enum(
@@ -104,6 +113,10 @@ class ScheduledPost(TimestampMixin, Base):
     next_retry_at: Mapped[datetime | None] = mapped_column(AwareDateTime(), nullable=True)
     processing_started_at: Mapped[datetime | None] = mapped_column(AwareDateTime(), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(AwareDateTime(), nullable=True)
+
+    @property
+    def has_image(self) -> bool:
+        return self.image_bytes is not None
 
     user: Mapped["User"] = relationship(back_populates="scheduled_posts")
     linkedin_account: Mapped["LinkedInAccount"] = relationship(

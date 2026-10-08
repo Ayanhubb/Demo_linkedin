@@ -18,10 +18,7 @@ export function App() {
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
-          <div>
-            <p className="brand-kicker">Technical assessment</p>
-            <strong>LinkedIn Post Scheduler</strong>
-          </div>
+          <strong>Post Scheduler</strong>
         </div>
         <nav>
           {links.map((link) => (

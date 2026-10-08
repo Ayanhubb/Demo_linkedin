@@ -12,6 +12,7 @@ from app.services.linkedin.client import POSTS_URL, LinkedInClient
 from app.services.linkedin.posts_service import (
     PermanentLinkedInPostError,
     TransientLinkedInPostError,
+    publish_image_post,
     publish_text_post,
 )
 
@@ -120,6 +121,38 @@ def test_timeout_is_transient() -> None:
     assert raised.value.http_status is None
     assert raised.value.category == "transient"
     assert ACCESS_TOKEN not in str(raised.value)
+
+
+def test_image_post_uploads_then_publishes() -> None:
+    image = b"\x89PNG\r\n\x1a\nfake"
+    upload_url = "https://www.linkedin.com/dms-uploads/image"
+    image_urn = "urn:li:image:C4E10AQEXAMPLE"
+    captured = CapturedLinkedIn(httpx.Response(500))
+    responses = [
+        httpx.Response(200, json={"value": {"uploadUrl": upload_url, "image": image_urn}}),
+        httpx.Response(201, content=b""),
+        httpx.Response(201, headers={"x-restli-id": "urn:li:share:200"}, content=b""),
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.requests.append(request)
+        return responses.pop(0)
+
+    client = LinkedInClient(get_settings(), transport=httpx.MockTransport(handler))
+    result = publish_image_post(_account(), "Hello with image", image, "image/png", client=client)
+    assert result.linkedin_post_id == "urn:li:share:200"
+    assert len(captured.requests) == 3
+    initialize = captured.requests[0]
+    assert "action=initializeUpload" in str(initialize.url)
+    assert json.loads(initialize.content)["initializeUploadRequest"]["owner"] == f"urn:li:person:{MEMBER_ID}"
+    upload = captured.requests[1]
+    assert str(upload.url) == upload_url
+    assert upload.content == image
+    assert upload.headers["content-type"] == "image/png"
+    published = json.loads(captured.requests[2].content)
+    assert published["commentary"] == "Hello with image"
+    assert published["content"]["media"]["id"] == image_urn
+    assert ACCESS_TOKEN not in str(result.model_dump())
 
 
 def test_malformed_success_response_is_permanent() -> None:

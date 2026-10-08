@@ -29,7 +29,7 @@ _ERROR = {"model": ErrorResponse}
     "/api/posts/schedule",
     response_model=ScheduledPostResponse,
     status_code=201,
-    summary="Schedule a text post",
+    summary="Schedule a post",
     responses={409: _ERROR, 422: _ERROR},
 )
 def schedule_post(
@@ -37,7 +37,13 @@ def schedule_post(
     session: Session = Depends(get_db),
 ) -> ScheduledPostResponse:
     try:
-        post = create_scheduled_post(session, body.content, body.scheduled_at)
+        post = create_scheduled_post(
+            session,
+            body.content,
+            body.scheduled_at,
+            image_bytes=body.image_bytes,
+            image_content_type=body.image_content_type,
+        )
     except NoLinkedInAccountError:
         raise HTTPException(status_code=409, detail="A connected LinkedIn account is required") from None
     return ScheduledPostResponse.model_validate(post)
@@ -82,7 +88,7 @@ def get_post(
 @router.delete(
     "/api/posts/{post_id}",
     status_code=204,
-    summary="Delete a post that LinkedIn has not accepted",
+    summary="Delete a post from the scheduler",
     responses={404: _ERROR, 409: _ERROR},
 )
 def delete_post(

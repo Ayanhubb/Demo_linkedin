@@ -114,7 +114,15 @@ def publish_claimed_post(post_id: uuid.UUID, client: LinkedInClient | None = Non
             return
         started = time.perf_counter()
         try:
-            result = service.publish_text_post(account, post.content)
+            if post.image_bytes:
+                result = service.publish_image_post(
+                    account,
+                    post.content,
+                    bytes(post.image_bytes),
+                    post.image_content_type or "",
+                )
+            else:
+                result = service.publish_text_post(account, post.content)
         except PermanentLinkedInPostError as exc:
             _mark_failed(post, exc.code, duration=time.perf_counter() - started)
             return

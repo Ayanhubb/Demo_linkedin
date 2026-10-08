@@ -18,6 +18,7 @@ export interface ScheduledPost {
   status: PostStatus;
   attempt_count: number;
   last_error: string | null;
+  has_image: boolean;
   created_at: string;
 }
 
@@ -42,10 +43,24 @@ export function listPosts(): Promise<ScheduledPost[]> {
   return request<ScheduledPost[]>("/api/posts");
 }
 
-export function schedulePost(content: string, scheduledAt: string): Promise<ScheduledPost> {
+export function deletePost(id: string): Promise<void> {
+  return request<void>(`/api/posts/${id}`, { method: "DELETE" });
+}
+
+export function schedulePost(
+  content: string,
+  scheduledAt: string,
+  image?: { mediaType: string; base64: string },
+): Promise<ScheduledPost> {
   return request<ScheduledPost>("/api/posts/schedule", {
     method: "POST",
-    body: JSON.stringify({ content, scheduled_at: scheduledAt }),
+    body: JSON.stringify({
+      content,
+      scheduled_at: scheduledAt,
+      ...(image
+        ? { image_content_type: image.mediaType, image_base64: image.base64 }
+        : {}),
+    }),
   });
 }
 
@@ -59,6 +74,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     throw new ApiError(await readError(response), response.status);
+  }
+  if (response.status === 204) {
+    return undefined as T;
   }
   return (await response.json()) as T;
 }

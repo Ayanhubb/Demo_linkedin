@@ -150,6 +150,6 @@ def test_schedule_list_get_and_delete(db_session: Session) -> None:
     )
     db_session.add(published)
     db_session.flush()
-    blocked = client.delete(f"/api/posts/{published_id}")
-    assert blocked.status_code == 409
-    assert client.get(f"/api/posts/{published_id}").status_code == 200
+    removed = client.delete(f"/api/posts/{published_id}")
+    assert removed.status_code == 204
+    assert client.get(f"/api/posts/{published_id}").status_code == 404

@@ -1,23 +1,26 @@
 # LinkedIn Post Scheduler
 
-A small application that connects one LinkedIn member, stores a text post, and publishes it at a chosen time. The browser does not schedule or call LinkedIn. PostgreSQL is the source of truth. A Celery worker publishes.
+A small application that connects one LinkedIn member and publishes posts to that member's profile at chosen times. Each post is text, with an optional image. The browser does not call LinkedIn. PostgreSQL is the source of truth. A Celery worker publishes.
 
 ## 1. Project overview
 
-An operator opens the React app, connects LinkedIn, and schedules one text post. FastAPI stores the row as `SCHEDULED`. Celery Beat asks the worker, every 15 seconds, to claim posts whose time has arrived. The worker calls LinkedIn's Posts API and records `PUBLISHED` or `FAILED`.
+An operator opens the React app, connects LinkedIn, and schedules one or more posts. FastAPI stores each row as `SCHEDULED`. Celery Beat asks the worker, every 15 seconds, to claim posts whose time has arrived. The worker calls LinkedIn's Posts API and records `PUBLISHED` or `FAILED`.
 
-There is no password login. One local operator owns the connection and the posts.
+There is no password login. One local operator owns the connection and the posts. New posts use the LinkedIn profile that connected most recently. They appear on that member's profile.
 
 ## 2. Features
 
 - LinkedIn OAuth 2.0 authorization code flow
 - Encrypted token storage
-- Schedule, list, fetch, and delete a text post
+- Schedule, list, fetch, and delete posts. Several posts can be waiting at once
+- Optional JPEG, PNG, or GIF, up to 5 MB, stored with the post and published with the caption
 - Background publishing with Celery Beat
 - Exponential backoff with jitter for temporary LinkedIn errors
 - Database locks so two workers cannot publish the same post
 - Health check for PostgreSQL and Redis
 - Dashboard, connection, schedule, and posts screens
+
+
 
 ## 3. Architecture
 
@@ -41,20 +44,25 @@ The full diagrams are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Endpoint 
 - React, Vite, TypeScript
 - Docker Compose
 
+
+
 ## 5. Prerequisites
 
 - Docker Desktop
-- A LinkedIn developer application with the Share on LinkedIn product and the `w_member_social` scope
+- A LinkedIn developer application with Share on LinkedIn and Sign In with LinkedIn using OpenID Connect. The working scopes are `openid profile w_member_social`
 - Python 3.12 only if you want to run pytest on the host
+
+
 
 ## 6. LinkedIn Developer App setup
 
 1. Create an app at [LinkedIn Developers](https://www.linkedin.com/developers/).
-2. Add the Share on LinkedIn product.
+2. Add the Share on LinkedIn product and Sign In with LinkedIn using OpenID Connect.
 3. Under Auth, add this redirect URL: `http://localhost:8080/api/auth/linkedin/callback`
 4. Copy the client id and client secret into `.env`. Do not put them in the frontend.
+5. Set `LINKEDIN_SCOPES=openid profile w_member_social` in `.env`.
 
-The app requests `openid` in addition to `w_member_social` because the current member-identity endpoint is OpenID Connect userinfo. It does not call the deprecated `/v2/me` or `ugcPosts` APIs.
+The identity call uses OpenID Connect userinfo. LinkedIn requires `openid` and `profile` on that request. Posting uses `w_member_social`. The app does not call the deprecated `/v2/me` or `ugcPosts` APIs. One client id and one client secret identify this developer app. They do not create extra LinkedIn accounts.
 
 ## 7. OAuth configuration
 
@@ -66,24 +74,29 @@ The callback exchanges the code on the server and stores the tokens encrypted. T
 
 Copy `.env.example` to `.env`. Leave secrets out of git.
 
-| Variable | Purpose |
-| --- | --- |
-| `DATABASE_URL` | Host-side database URL for pytest. Compose sets its own URL for containers. |
-| `REDIS_URL` | Celery broker. Compose uses `redis://redis:6379/0`. |
-| `LINKEDIN_CLIENT_ID` | OAuth client id |
-| `LINKEDIN_CLIENT_SECRET` | OAuth client secret. Server only. |
-| `LINKEDIN_REDIRECT_URI` | Must be `http://localhost:8080/api/auth/linkedin/callback` for Compose. |
-| `LINKEDIN_VERSION` | Posts API version, `YYYYMM`. Default `202609`. |
-| `SECRET_KEY` | Reserved for this demo. Not used to store tokens. |
-| `TOKEN_ENCRYPTION_KEY` | Fernet key for OAuth tokens. |
-| `FRONTEND_URL` | `http://localhost:5173`. `FRONTEND_ORIGIN` is accepted as the same setting. |
+
+| Variable                                              | Purpose                                                                                        |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                        | Host-side database URL for pytest. Compose sets its own URL for containers.                    |
+| `REDIS_URL`                                           | Celery broker. Compose uses `redis://redis:6379/0`.                                            |
+| `LINKEDIN_CLIENT_ID`                                  | OAuth client id                                                                                |
+| `LINKEDIN_CLIENT_SECRET`                              | OAuth client secret. Server only.                                                              |
+| `LINKEDIN_REDIRECT_URI`                               | Must be `http://localhost:8080/api/auth/linkedin/callback` for Compose.                        |
+| `LINKEDIN_SCOPES`                                     | `openid profile w_member_social`. Compose falls back to `w_member_social` when this is empty.  |
+| `LINKEDIN_VERSION`                                    | Posts API version, `YYYYMM`. Default `202609`.                                                 |
+| `SECRET_KEY`                                          | Reserved. Tokens are encrypted with `TOKEN_ENCRYPTION_KEY`.                                   |
+| `TOKEN_ENCRYPTION_KEY`                                | Fernet key for OAuth tokens.                                                                   |
+| `FRONTEND_URL`                                        | `http://localhost:5173`. `FRONTEND_ORIGIN` is accepted as the same setting.                    |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Local Compose database. Default user and database name are `scheduler` / `linkedin_scheduler`. |
+
 
 Generate the encryption key:
 
 ```powershell
 py -3.12 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
+
+
 
 ## 9. Local setup
 
@@ -106,15 +119,19 @@ From the repository root:
 docker compose up --build
 ```
 
-| Service | URL or role |
-| --- | --- |
-| frontend | http://localhost:5173 |
-| backend | http://localhost:8080 |
-| Swagger | http://localhost:8080/docs |
-| postgres | host port 5433 |
-| redis | host port 6379 |
-| worker | Celery worker |
-| beat | Celery Beat |
+Leave that window open. To run in the background, use `docker compose up --build -d`. To stop and keep the database volume, use `docker compose down`.
+
+
+| Service  | URL or role                                              |
+| -------- | -------------------------------------------------------- |
+| frontend | [http://localhost:5173](http://localhost:5173)           |
+| backend  | [http://localhost:8080](http://localhost:8080)           |
+| Swagger  | [http://localhost:8080/docs](http://localhost:8080/docs) |
+| postgres | host port 5433                                           |
+| redis    | host port 6379                                           |
+| worker   | Celery worker                                            |
+| beat     | Celery Beat                                              |
+
 
 The API is published on port 8080 so it does not collide with another local service on port 8000.
 
@@ -126,7 +143,7 @@ Compose runs `alembic upgrade head` when the API container starts. On the host, 
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-The revision is `0001_initial`.
+Revisions are `0001_initial`, then `0002_post_images` for the optional image columns.
 
 ## 12. Running backend
 
@@ -167,21 +184,25 @@ Set `VITE_API_URL=http://localhost:8080` if the API is not on that origin. The f
 
 ## 16. API endpoints
 
-Interactive docs: http://localhost:8080/docs
+Interactive docs: [http://localhost:8080/docs](http://localhost:8080/docs)
 
 There is no end-user login. The operator is whoever can reach the API.
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/health` | PostgreSQL and Redis connectivity |
-| `GET` | `/api/auth/linkedin` | Start OAuth. Redirects to LinkedIn. |
-| `GET` | `/api/auth/linkedin/callback` | Finish OAuth and redirect to the UI. |
-| `POST` | `/api/posts/schedule` | Store a future text post. |
-| `GET` | `/api/posts` | List posts, newest schedule time first. |
-| `GET` | `/api/posts/{id}` | Fetch one post. |
-| `DELETE` | `/api/posts/{id}` | Delete a post LinkedIn has not accepted. |
-| `GET` | `/api/dashboard` | Connection flag and counts. |
-| `GET` | `/api/linkedin/status` | `{"connected": true}` or false. |
+
+| Method   | Path                          | Purpose                                  |
+| -------- | ----------------------------- | ---------------------------------------- |
+| `GET`    | `/health`                     | PostgreSQL and Redis connectivity        |
+| `GET`    | `/api/auth/linkedin`          | Start OAuth. Redirects to LinkedIn.      |
+| `GET`    | `/api/auth/linkedin/callback` | Finish OAuth and redirect to the UI.     |
+| `POST`   | `/api/posts/schedule`         | Store a future post. An image is optional. |
+| `GET`    | `/api/posts`                  | List posts, newest schedule time first.  |
+| `GET`    | `/api/posts/{id}`             | Fetch one post.                          |
+| `DELETE` | `/api/posts/{id}`             | Remove a post from this scheduler.       |
+| `GET`    | `/api/dashboard`              | Connection flag and counts.              |
+| `GET`    | `/api/linkedin/status`        | `{"connected": true}` or false.          |
+
+
+
 
 ### GET /health
 
@@ -189,11 +210,15 @@ There is no end-user login. The operator is whoever can reach the API.
 - Response `200`: `{"status":"ok"}`
 - Response `503`: `{"status":"unavailable","dependency":"postgres"}` or `"redis"`
 
+
+
 ### GET /api/auth/linkedin
 
 - Authentication: none. This starts authentication.
 - Response `302`: redirect to `https://www.linkedin.com/oauth/v2/authorization`
 - Response `503`: `{"error":"not_configured","message":"LinkedIn OAuth is not configured"}` when the client id or secret is empty
+
+
 
 ### GET /api/auth/linkedin/callback
 
@@ -202,14 +227,23 @@ There is no end-user login. The operator is whoever can reach the API.
 - Failure `302`: `{FRONTEND_URL}/connection?linkedin_error=invalid_state` (or `expired_state`, `token_exchange_failed`, `access_denied`)
 - The JSON body never contains the access token or client secret
 
+
+
 ### POST /api/posts/schedule
 
 - Authentication: a connected LinkedIn account must already exist
 - Request:
 
 ```json
-{"content":"Hello from the scheduler.","scheduled_at":"2026-10-08T10:00:00+05:30"}
+{
+  "content": "Hello from the scheduler.",
+  "scheduled_at": "2026-10-08T10:00:00+05:30",
+  "image_base64": null,
+  "image_content_type": null
+}
 ```
+
+`image_base64` and `image_content_type` are optional. When an image is sent, both fields are required. Accepted types are `image/jpeg`, `image/png`, and `image/gif`. The decoded image must be from 1 byte to 5 MB. A `data:` URL prefix is stripped before decoding. The response never includes the image bytes.
 
 - Response `201`:
 
@@ -221,13 +255,16 @@ There is no end-user login. The operator is whoever can reach the API.
   "status": "scheduled",
   "attempt_count": 0,
   "last_error": null,
+  "has_image": false,
   "created_at": "2026-10-07T18:00:00Z"
 }
 ```
 
 - `409` no connected account
-- `422` empty content, content over 3000 characters, missing timezone, or a time that is not in the future
+- `422` empty content, content over 3000 characters, missing timezone, a time that is not in the future, or an image that fails the type or size checks
 - Error body: `{"error":"validation_error","message":"..."}` or `{"error":"conflict","message":"A connected LinkedIn account is required"}`
+
+
 
 ### GET /api/posts
 
@@ -236,16 +273,21 @@ There is no end-user login. The operator is whoever can reach the API.
 - Response `200`: array of post objects, ordered by `scheduled_at` descending
 - `409` no account. `422` unknown status
 
+
+
 ### GET /api/posts/{id}
 
 - Authentication: connected account, and the post must belong to that user
 - `200` one post. `404` missing. `409` no account
 
+
+
 ### DELETE /api/posts/{id}
 
 - Authentication: same as fetch
-- `204` deleted when the post is not published and has no LinkedIn post id
-- `404` missing. `409` published, or no account
+- `204` the row is removed, including a row that is already `published`
+- `404` missing. `409` no connected account
+- This removes the post from the scheduler. A post already on the LinkedIn profile stays there
 
 Errors never include a stack trace. The server log has the trace, with tokens redacted.
 
@@ -255,8 +297,9 @@ Errors never include a stack trace. The server log has the trace, with tokens re
 2. `POST /api/posts/schedule` validates the text and the time, creates an idempotency key, and inserts `SCHEDULED`.
 3. Beat runs `process_due_posts`.
 4. One SQL `UPDATE` claims due rows: `SCHEDULED` becomes `PROCESSING`, `attempt_count` increases, and other workers skip locked rows.
-5. The worker locks the row again. It calls LinkedIn only when the status is still `PROCESSING` and `linkedin_post_id` is empty.
+5. The worker locks the row again. It calls LinkedIn only when the status is still `PROCESSING` and `linkedin_post_id` is empty. A row with image bytes is uploaded, then published with that image. A row without an image is a text post.
 6. A successful response stores the LinkedIn post id and `PUBLISHED` in one `UPDATE`.
+7. Each tick claims up to 20 due posts, earliest time first. Submit the Schedule form again to queue another post.
 
 Times are stored in UTC. The UI formats them in the browser's timezone.
 
@@ -313,6 +356,8 @@ npm install
 npm run build
 ```
 
+
+
 ## 22. Troubleshooting
 
 - `GET /health` returns redis unavailable: start Redis, or use Compose.
@@ -320,6 +365,8 @@ npm run build
 - LinkedIn redirects with `invalid_state`: start OAuth from `http://localhost:8080/api/auth/linkedin`, not from a different host. The state cookie is tied to that host and port.
 - A post stays `PROCESSING`: the worker stopped after the claim and before it wrote the outcome. Do not publish that row by hand until you know whether LinkedIn accepted it.
 - Port 8080 or 5173 is in use: stop the other process or change the Compose port and `LINKEDIN_REDIRECT_URI` together.
+
+
 
 ## 23. Security considerations
 
@@ -332,15 +379,17 @@ Details are in [docs/SECURITY.md](docs/SECURITY.md).
 - SQL uses SQLAlchemy bound parameters.
 - The local Compose database password defaults to `scheduler`. Change `POSTGRES_PASSWORD` before using this anywhere but a private machine.
 
+
+
 ## 24. Demo instructions
 
 1. Put LinkedIn credentials and a Fernet key in `.env`.
 2. `docker compose up --build`
-3. Open http://localhost:5173
+3. Open [http://localhost:5173](http://localhost:5173)
 4. Open LinkedIn, click Connect LinkedIn, approve the app, and confirm the page says Connected.
-5. Schedule a post one or two minutes ahead.
-6. Open Posts and click Refresh until the badge says `PUBLISHED`.
-7. Show http://localhost:8080/docs and http://localhost:8080/health
+5. Schedule a post one or two minutes ahead. Add a JPEG, PNG, or GIF if you want an image on the profile post. Repeat the form to queue more posts.
+6. Open Posts and click Refresh until the badge says `PUBLISHED`. Delete removes that row from the list.
+7. Show [http://localhost:8080/docs](http://localhost:8080/docs) and [http://localhost:8080/health](http://localhost:8080/health)
 8. Optional: `cd backend` and run `pytest` to show the mocked LinkedIn cases, retries, and the duplicate-worker tests.
 
 A live publish needs a real LinkedIn app. Without credentials, Connect LinkedIn returns the not-configured error, and the pytest suite still demonstrates publishing with mocked LinkedIn responses.
